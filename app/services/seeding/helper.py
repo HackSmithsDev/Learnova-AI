@@ -2,9 +2,10 @@ import os
 import json
 import time
 from groq import Groq
+from config import Config
 
 # Initialize Client - Good call using getenv for security!
-client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+client = Groq(api_key=Config.GROQ_API_KEY)
 
 def call_groq(prompt: str, response_model):
     """
@@ -28,7 +29,7 @@ def call_groq(prompt: str, response_model):
                     },
                     {"role": "user", "content": prompt}
                 ],
-                model="llama-3.3-70b-versatile",
+                model=Config.GROQ_MODEL,
                 response_format={"type": "json_object"},
                 temperature=0.6 # Lowered slightly for more consistent academic facts
             )

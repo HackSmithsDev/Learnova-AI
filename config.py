@@ -21,7 +21,8 @@ class Config:
     # --- Gemini & AI Configuration ---
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
     OPEN_AI_API_KEY = os.getenv('OPEN_AI_API_KEY')
-    OPEN_AI_API_KEY = os.getenv('OPEN_AI_API_KEY')
+    GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+    GROQ_MODEL = os.getenv('GROQ_MODEL')
     
     # --- Learnova Curriculum Constraints (2026 Rules) ---
     MIN_PROJECTS_PER_COURSE = 5

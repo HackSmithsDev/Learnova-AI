@@ -72,6 +72,18 @@ pip install -r requirements.txt
 
 # Start the application
 python wsgi.py
+
+4. Run Tests
+
+Install the development dependencies and run the test suite from the project root:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+The shared fixtures in `conftest.py` provide an isolated SQLite-backed Flask app, test client, CLI runner, and database extension for tests.
+
 📂 Project Structure
 app/: Main application logic.
 

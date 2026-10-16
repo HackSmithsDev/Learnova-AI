@@ -67,8 +67,16 @@ class DevelopmentConfig(Config):
 class ProductionConfig(Config):
     DEBUG = False
 
+class TestingConfig(Config):
+    TESTING = True
+    SQLALCHEMY_DATABASE_URI = 'sqlite://'
+    REDIS_URL = 'memory://'
+    RATELIMIT_STORAGE_URI = 'memory://'
+    MAIL_SUPPRESS_SEND = True
+
 config = {
     'development': DevelopmentConfig,
     'production': ProductionConfig,
+    'testing': TestingConfig,
     'default': DevelopmentConfig
 }

@@ -27,14 +27,16 @@ class Config:
     # --- Base URL for External Links ---
     FRONTEND_BASE_URL = os.getenv('FRONTEND_BASE_URL', 'http://127.0.0.1:5001').rstrip('/')
 
-    # --- Titan Mail SMTP Settings ---
+    # --- SMTP Settings ---
     MAIL_SERVER = os.getenv('MAIL_SERVER', 'smtp.titan.email')
     MAIL_PORT = int(os.getenv('MAIL_PORT') or 465)
+    MAIL_USE_TLS = os.getenv('MAIL_USE_TLS', 'False').strip().lower() in {'1', 'true', 'yes', 'on'}
+    MAIL_USE_SSL = os.getenv('MAIL_USE_SSL', 'True').strip().lower() in {'1', 'true', 'yes', 'on'}
     MAIL_USERNAME = os.getenv('MAIL_USERNAME')
     MAIL_PASSWORD = os.getenv('MAIL_PASSWORD')
     MAIL_FROM = os.getenv('MAIL_FROM', os.getenv('MAIL_USERNAME'))
     MAIL_FROM_NAME = os.getenv('MAIL_FROM_NAME', 'Learnova')
-    MAIL_ADMIN_ADDRESS = os.getenv('MAIL_ADMIN_ADDRESS')
+    MAIL_ADMIN_ADDRESS = os.getenv('MAIL_ADMIN_ADDRESS') or os.getenv('ADMIN_EMAIL')
 
     # --- File Upload Configuration ---
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))

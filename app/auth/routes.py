@@ -151,7 +151,7 @@ def forgot_password():
     redis_key = f'reset:{user.email}'
 
     try:
-        current_app.redis.setex(redis_key, 300, code)
+        current_app.redis.setex(redis_key, 600, code)
         # app = current_app._get_current_object()    
         # # Start email thread
         # threading.Thread(
@@ -192,6 +192,7 @@ def verify_code():
     # 2. Check the code
     if stored_code and secrets.compare_digest(stored_code, code_submitted):
         session['reset_verified_email'] = user.email
+        session['reset_timestamp'] = datetime.now(timezone.utc).timestamp()
         current_app.redis.delete(attempts_key) 
         return jsonify({"status": "success", "redirect": url_for('auth.reset_password')}), 200
     

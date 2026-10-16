@@ -4,9 +4,6 @@ import time
 from groq import Groq
 from flask import current_app
 
-# Initialize Client - Good call using getenv for security!
-client = Groq(api_key=current_app.config['GROQ_API_KEY'])
-
 def call_groq(prompt: str, response_model):
     """
     Sends a prompt to Groq and forces the response into the 
@@ -14,6 +11,7 @@ def call_groq(prompt: str, response_model):
     """
     # Prof Tip: 70B is great, but it can be slow. 
     # Let's add a small retry logic in case of a 503/timeout
+    client = Groq(api_key=current_app.config['GROQ_API_KEY'])
     max_retries = 3
     for attempt in range(max_retries):
         try:

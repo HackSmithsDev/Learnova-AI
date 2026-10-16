@@ -1,5 +1,6 @@
 import smtplib
 import logging
+import ssl
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -20,17 +21,23 @@ logger = logging.getLogger(__name__)
 
 
 def _send_sync_email(to_email: str, subject: str, html_body: str, text_body: str = None, reply_to: str = None) -> bool:
-    """Synchronous worker that connects to Titan Mail via SMTP_SSL (port 465)."""
+    """Send an email using the configured SMTP TLS mode."""
     app = current_app._get_current_object()
     mail_server = app.config.get('MAIL_SERVER', 'smtp.titan.email')
     mail_port = app.config.get('MAIL_PORT', 465)
+    use_ssl = app.config.get('MAIL_USE_SSL', True)
+    use_tls = app.config.get('MAIL_USE_TLS', False)
     username = app.config.get('MAIL_USERNAME')
     password = app.config.get('MAIL_PASSWORD')
     mail_from = app.config.get('MAIL_FROM') or username
     from_name = app.config.get('MAIL_FROM_NAME', 'Learnova')
 
     if not username or not password:
-        logger.warning("Titan Mail credentials missing in configuration. Email skipped.")
+        logger.error("SMTP credentials missing in configuration. Email was not sent.")
+        return False
+
+    if use_ssl == use_tls:
+        logger.error("Configure exactly one of MAIL_USE_SSL or MAIL_USE_TLS.")
         return False
 
     msg = MIMEMultipart("alternative")
@@ -46,13 +53,16 @@ def _send_sync_email(to_email: str, subject: str, html_body: str, text_body: str
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     try:
-        with smtplib.SMTP_SSL(mail_server, mail_port, timeout=12) as server:
+        smtp_class = smtplib.SMTP_SSL if use_ssl else smtplib.SMTP
+        with smtp_class(mail_server, mail_port, timeout=12) as server:
+            if use_tls:
+                server.starttls(context=ssl.create_default_context())
             server.login(username, password)
             server.sendmail(mail_from, [to_email], msg.as_string())
-        logger.info(f"Email successfully delivered to {to_email} via Titan Mail.")
+        logger.info("Email accepted by configured SMTP server for %s.", to_email)
         return True
     except Exception as e:
-        logger.error(f"Failed to send email to {to_email} via Titan Mail: {e}")
+        logger.error("Failed to send email to %s via configured SMTP server: %s", to_email, e)
         return False
 
 
@@ -81,7 +91,7 @@ def send_welcome_email(recipient_email: str, username: str):
     )
     text_body = f"Hi {username}, welcome to Learnova! Visit your dashboard here: {dashboard_link}"
 
-    _send_sync_email(recipient_email, subject, html_body, text_body)
+    return _send_sync_email(recipient_email, subject, html_body, text_body)
 
 
 # =========================================================================
@@ -105,9 +115,10 @@ def send_login_alert(recipient_email: str, username: str):
             f"Hello {username}, a new login was detected on your account at {timestamp_str}. "
             f"If this wasn't you, reset your password here: {reset_url}"
         )
-        _send_sync_email(recipient_email, subject, html_body, text_body)
+        return _send_sync_email(recipient_email, subject, html_body, text_body)
     except Exception as e:
         logger.error(f"Failed to prepare login alert for {recipient_email}: {e}")
+        return False
 
 
 # =========================================================================
@@ -124,9 +135,10 @@ def send_password_reset_code(recipient_email: str, username: str, code: str):
             username=username, 
             code=code
         )
-        _send_sync_email(recipient_email, subject, html_body, text_body)
+        return _send_sync_email(recipient_email, subject, html_body, text_body)
     except Exception as e:
         logger.error(f"Failed to send OTP to {recipient_email}: {e}")
+        return False
 
 
 # =========================================================================
@@ -143,9 +155,10 @@ def send_password_reset_success_email(recipient_email: str, username: str):
 
     try:
         html_body = PASSWORD_RESET_SUCCESS_HTML_BODY.format(username=username)
-        _send_sync_email(recipient_email, subject, html_body, text_body)
+        return _send_sync_email(recipient_email, subject, html_body, text_body)
     except Exception as e:
         logger.error(f"Failed to send reset success email to {recipient_email}: {e}")
+        return False
 
 
 # =========================================================================
@@ -162,9 +175,10 @@ def send_delete_account_success_email(recipient_email: str, username: str):
 
     try:
         html_body = ACCOUNT_DELETED_HTML_BODY.format(username=username)
-        _send_sync_email(recipient_email, subject, html_body, text_body)
+        return _send_sync_email(recipient_email, subject, html_body, text_body)
     except Exception as e:
         logger.error(f"Failed to send deletion email to {recipient_email}: {e}")
+        return False
 
 
 # =========================================================================
@@ -188,7 +202,7 @@ def send_support_assurance_email(recipient_email: str, username: str, issue_type
             issue_type=issue_type, 
             issue_details=issue_details
         )
-        _send_sync_email(recipient_email, user_subject, user_html, user_text)
+        user_sent = _send_sync_email(recipient_email, user_subject, user_html, user_text)
 
         # 2. Admin notification with Reply-To header pointing to user's email
         if admin_email:
@@ -205,10 +219,15 @@ Message:
 End of Ticket.
 """
             admin_html = f"<pre style='font-family: monospace;'>{admin_text}</pre>"
-            _send_sync_email(admin_email, admin_subject, admin_html, admin_text, reply_to=recipient_email)
+            admin_sent = _send_sync_email(admin_email, admin_subject, admin_html, admin_text, reply_to=recipient_email)
+            return user_sent and admin_sent
+
+        logger.warning("Support ticket email sent without an admin notification: MAIL_ADMIN_ADDRESS is not configured.")
+        return user_sent
             
     except Exception as e:
         logger.error(f"Failed to complete support email cycle for {recipient_email}: {e}")
+        return False
 
 
 # =========================================================================
@@ -233,6 +252,7 @@ def send_course_fetched_email(recipient_email: str, username: str, branch_name: 
             f"Hi {username}, the {course_context} {course_grade} {branch_name} course "
             f"you requested is now live on Learnova! View it here: {courses_link}"
         )
-        _send_sync_email(recipient_email, subject, html_body, text_body)
+        return _send_sync_email(recipient_email, subject, html_body, text_body)
     except Exception as e:
         logger.error(f"Failed to send course-fetched email to {recipient_email}: {e}")
+        return False

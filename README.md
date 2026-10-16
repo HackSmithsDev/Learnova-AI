@@ -43,11 +43,15 @@ DATABASE_URL=postgresql://my_user:my_password@my_host:5432/my_db
 REDIS_URL=redis://redis:6379/0
 
 # Mail Configuration
-MAIL_SERVER=smtp.gmail.com
-MAIL_PORT=587
-MAIL_USE_TLS=True
-MAIL_USERNAME=your.learnova.email@gmail.com
-MAIL_PASSWORD=your_app_specific_password
+MAIL_SERVER=smtpout.secureserver.net
+MAIL_PORT=465
+MAIL_USE_TLS=False
+MAIL_USE_SSL=True
+MAIL_USERNAME=your_mail_username
+MAIL_PASSWORD=your_mail_password
+MAIL_FROM=your_mail_username
+MAIL_FROM_NAME=Learnova
+ADMIN_EMAIL=your_admin_email
 2. Run with Docker (Recommended)
 
 This method handles PostgreSQL and Redis setup automatically.
@@ -67,7 +71,7 @@ Bash
 pip install -r requirements.txt
 
 # Start the application
-python run.py
+python wsgi.py
 📂 Project Structure
 app/: Main application logic.
 
@@ -79,7 +83,7 @@ static/: CSS, Modern JS (Voice recognition logic), and user uploads.
 
 config.py: Centralized configuration for Development and Production.
 
-run.py: Entry point that initializes the Flask factory.
+wsgi.py: Entry point that initializes the Flask factory.
 
 Dockerfile & docker-compose.yml: Full container orchestration logic.
 

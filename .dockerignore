@@ -1,0 +1,31 @@
+# --- Python & Cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- Virtual Environments ---
+venv/
+.venv/
+env/
+.env
+bin/
+lib/
+
+# --- Version Control ---
+.git/
+.gitignore
+.dockerignore
+
+# --- Local Uploads & Logs ---
+app/static/uploads/profile_images/*
+app/static/uploads/pdfs/*
+*.log
+instance/
+
+# --- Build & OS Files ---
+Dockerfile
+docker-compose.yml
+.DS_Store
+node_modules/

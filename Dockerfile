@@ -25,7 +25,7 @@ COPY . .
 RUN mkdir -p app/static/uploads/profile_images app/static/uploads/pdfs
 
 # Expose the port
-EXPOSE 5000
+EXPOSE 5001
 
 # Start with Gunicorn for production-grade threading
-CMD ["gunicorn", "--workers", "4", "--threads", "2", "--bind", "0.0.0.0:5000", "run:app"]
+CMD ["gunicorn", "--workers", "4", "--threads", "2", "--bind", "0.0.0.0:5001", "run:app"]

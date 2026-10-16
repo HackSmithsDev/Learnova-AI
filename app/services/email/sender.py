@@ -1,96 +1,122 @@
-from flask import current_app, url_for
-from flask_mail import Message
-from datetime import datetime
+import smtplib
 import logging
-from app.extensions import mail, executor
-# Note: Assuming this module is created and contains HTML/Text templates
+from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from flask import current_app, url_for
+from app.extensions import executor
+
 from .templates import (
     PASSWORD_RESET_SUCCESS_HTML_BODY, 
-    WELCOME_HTML_BODY, LOGIN_ALERT_HTML_BODY, 
+    WELCOME_HTML_BODY, 
+    LOGIN_ALERT_HTML_BODY, 
     PASSWORD_RESET_VERIFICATION_HTML_BODY,
     ACCOUNT_DELETED_HTML_BODY,
     SUPPORT_ASSURANCE_HTML_BODY,
-    COURSE_FETCHED_HTML_BODY)
+    COURSE_FETCHED_HTML_BODY
+)
 
 logger = logging.getLogger(__name__)
 
-# This decorator tells Flask-Executor to automatically 
-# provide the app context when this function runs in the background.
-@executor.job
-def send_welcome_email(recipient_email, username):
-    """Sends a welcome email to the newly registered user."""
-    # Getting the real app object for context-safe operations
+
+def _send_sync_email(to_email: str, subject: str, html_body: str, text_body: str = None, reply_to: str = None) -> bool:
+    """Synchronous worker that connects to Titan Mail via SMTP_SSL (port 465)."""
     app = current_app._get_current_object()
-    
+    mail_server = app.config.get('MAIL_SERVER', 'smtp.titan.email')
+    mail_port = app.config.get('MAIL_PORT', 465)
+    username = app.config.get('MAIL_USERNAME')
+    password = app.config.get('MAIL_PASSWORD')
+    mail_from = app.config.get('MAIL_FROM') or username
+    from_name = app.config.get('MAIL_FROM_NAME', 'Learnova')
+
+    if not username or not password:
+        logger.warning("Titan Mail credentials missing in configuration. Email skipped.")
+        return False
+
+    msg = MIMEMultipart("alternative")
+    msg["From"] = f"{from_name} <{mail_from}>"
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    if reply_to:
+        msg["Reply-To"] = reply_to
+
+    # Attach text fallback first (if available), then HTML body
+    if text_body:
+        msg.attach(MIMEText(text_body, "plain", "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+    try:
+        with smtplib.SMTP_SSL(mail_server, mail_port, timeout=12) as server:
+            server.login(username, password)
+            server.sendmail(mail_from, [to_email], msg.as_string())
+        logger.info(f"Email successfully delivered to {to_email} via Titan Mail.")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send email to {to_email} via Titan Mail: {e}")
+        return False
+
+
+def _get_external_url(endpoint: str, fallback_path: str = "/") -> str:
+    """Safely build external URLs inside background executor threads."""
+    app = current_app._get_current_object()
+    base_url = app.config.get('FRONTEND_BASE_URL', 'http://127.0.0.1:5001')
+    try:
+        return url_for(endpoint, _external=True)
+    except RuntimeError:
+        return f"{base_url}{fallback_path}"
+
+
+# =========================================================================
+# 1. WELCOME NOTIFICATION
+# =========================================================================
+@executor.job
+def send_welcome_email(recipient_email: str, username: str):
+    """Sends a welcome email to the newly registered user."""
+    dashboard_link = _get_external_url('main.get_user_profile', '/profile')
     subject = "Welcome to Learnova! 🚀"
-    sender = app.config.get('MAIL_DEFAULT_SENDER') or app.config.get('MAIL_SENDER')
-    
-    # We generate the link inside the app context
-    dashboard_link = url_for('main.get_user_profile', _external=True) 
 
     html_body = WELCOME_HTML_BODY.format(
         username=username, 
         dashboard_url=dashboard_link
     )
+    text_body = f"Hi {username}, welcome to Learnova! Visit your dashboard here: {dashboard_link}"
 
-    msg = Message(subject, sender=sender, recipients=[recipient_email])
-    msg.html = html_body
-    
-    # Text fallback for accessibility
-    msg.body = f"Hi {username}, welcome to Learnova! Visit your dashboard here: {dashboard_link}"
-    
-    try:
-        # If using threads, you'd wrap this in 'with app.app_context():'
-        mail.send(msg)
-        logger.info(f"Welcome email dispatched to {recipient_email}")
-    except Exception as e:
-        logger.error(f"Failed to send welcome email to {recipient_email}: {e}")
+    _send_sync_email(recipient_email, subject, html_body, text_body)
 
+
+# =========================================================================
+# 2. LOGIN SECURITY ALERT
+# =========================================================================
 @executor.job
-def send_login_alert(recipient_email, username):
+def send_login_alert(recipient_email: str, username: str):
     """Sends a security alert when a successful login occurs."""
-    app = current_app._get_current_object()
-    
+    reset_url = _get_external_url('auth.forgot_password', '/forgot-password')
+    timestamp_str = datetime.now().strftime('%b %d, %Y at %I:%M %p')
     subject = "Security Alert: New Login Detected 🛡️"
-    # Fallback to MAIL_DEFAULT_SENDER if MAIL_SENDER isn't set
-    sender = app.config.get('MAIL_DEFAULT_SENDER') or app.config.get('MAIL_SENDER')
-    
-    # Use 'external=True' for email links
-    # Pointing to forgot_password because reset_password usually needs a token/session
-    reset_url = url_for('auth.forgot_password', _external=True) 
 
     try:
         html_body = LOGIN_ALERT_HTML_BODY.format(
             username=username, 
             email=recipient_email,
-            time=datetime.now().strftime('%b %d, %Y at %I:%M %p'),
+            time=timestamp_str,
             reset_url=reset_url
         )
-
-        msg = Message(subject, sender=sender, recipients=[recipient_email])
-        msg.html = html_body
-        
-        # Text fallback
-        msg.body = f"Hello {username}, a new login was detected on your account at {datetime.now().strftime('%I:%M %p')}. If this wasn't you, reset your password here: {reset_url}"
-
-        mail.send(msg)
-        logger.info(f"Security alert sent to {recipient_email}")
-        
-    except KeyError as e:
-        logger.error(f"Template formatting error: Missing key {e}")
+        text_body = (
+            f"Hello {username}, a new login was detected on your account at {timestamp_str}. "
+            f"If this wasn't you, reset your password here: {reset_url}"
+        )
+        _send_sync_email(recipient_email, subject, html_body, text_body)
     except Exception as e:
-        logger.error(f"Failed to send login alert to {recipient_email}: {e}")
+        logger.error(f"Failed to prepare login alert for {recipient_email}: {e}")
 
 
+# =========================================================================
+# 3. OTP VERIFICATION CODE
+# =========================================================================
 @executor.job
-def send_password_reset_code(recipient_email, username, code):
-    """Sends a 6-digit verification code for password recovery."""
-    app = current_app._get_current_object()
-
+def send_password_reset_code(recipient_email: str, username: str, code: str):
+    """Sends a 6-digit OTP code for password recovery."""
     subject = f"{code} is your Learnova verification code"
-    sender = app.config.get('MAIL_DEFAULT_SENDER') or app.config.get('MAIL_SENDER')
-    
-    # Text-only fallback (Critical for OTPs)
     text_body = f"Hi {username}, your Learnova password reset code is: {code}. This code expires in 10 minutes."
 
     try:
@@ -98,157 +124,115 @@ def send_password_reset_code(recipient_email, username, code):
             username=username, 
             code=code
         )
-
-        msg = Message(subject, sender=sender, recipients=[recipient_email])
-        msg.html = html_body
-        msg.body = text_body  # Fallback for simple email clients
-
-        mail.send(msg)
-        logger.info(f"OTP [{code}] successfully sent to {recipient_email}")
-        
+        _send_sync_email(recipient_email, subject, html_body, text_body)
     except Exception as e:
         logger.error(f"Failed to send OTP to {recipient_email}: {e}")
 
+
+# =========================================================================
+# 4. PASSWORD RESET CONFIRMATION
+# =========================================================================
 @executor.job
-def send_password_reset_success_email(recipient_email, username):
+def send_password_reset_success_email(recipient_email: str, username: str):
     """Sends a confirmation email after a successful password reset."""
-    app = current_app._get_current_object()
-
     subject = "Security Update: Password Reset Successful ✅"
-    # Using the safer .get() for the sender
-    sender = app.config.get('MAIL_DEFAULT_SENDER') or app.config.get('MAIL_SENDER')
-    
-    # Format the HTML body
-    html_body = PASSWORD_RESET_SUCCESS_HTML_BODY.format(username=username)
+    text_body = (
+        f"Hi {username}, your Learnova password has been successfully reset. "
+        f"If you did not perform this action, please contact our support team immediately."
+    )
 
-    # Plain text fallback for security-conscious clients
-    text_body = f"Hi {username}, your Learnova password has been successfully reset. If you did not perform this action, please contact our support team immediately."
-
-    msg = Message(subject, sender=sender, recipients=[recipient_email])
-    msg.html = html_body
-    msg.body = text_body
-    
     try:
-        mail.send(msg)
-        logger.info(f"Password reset success notification sent to {recipient_email}")
+        html_body = PASSWORD_RESET_SUCCESS_HTML_BODY.format(username=username)
+        _send_sync_email(recipient_email, subject, html_body, text_body)
     except Exception as e:
-        # We log the error but don't crash the app, as the password is already changed
         logger.error(f"Failed to send reset success email to {recipient_email}: {e}")
 
 
+# =========================================================================
+# 5. ACCOUNT DELETION CONFIRMATION
+# =========================================================================
 @executor.job
-def send_delete_account_success_email(recipient_email, username):
+def send_delete_account_success_email(recipient_email: str, username: str):
     """Sends a final confirmation email after an account is purged."""
-    app = current_app._get_current_object()
-
     subject = "Confirmation: Your Learnova Account has been deleted"
-    # Using the safer config key we set up earlier
-    sender = app.config.get('MAIL_DEFAULT_SENDER') or app.config.get('MAIL_SENDER')
-    
-    # Text fallback
-    text_body = f"Hello {username}, this email confirms that your Learnova account and all associated data have been successfully deleted. We are sorry to see you go!"
+    text_body = (
+        f"Hello {username}, this email confirms that your Learnova account and all associated "
+        f"data have been successfully deleted. We are sorry to see you go!"
+    )
 
     try:
         html_body = ACCOUNT_DELETED_HTML_BODY.format(username=username)
-
-        msg = Message(subject, sender=sender, recipients=[recipient_email])
-        msg.html = html_body
-        msg.body = text_body
-        
-        mail.send(msg)
-        logger.info(f"Final goodbye sent to {recipient_email}")
-        
+        _send_sync_email(recipient_email, subject, html_body, text_body)
     except Exception as e:
-        # We log the error, but since the account is already deleted, 
-        # there is no user record left to retry this for.
         logger.error(f"Failed to send deletion email to {recipient_email}: {e}")
 
 
+# =========================================================================
+# 6. SUPPORT TICKET ASSURANCE & ADMIN NOTIFICATION
+# =========================================================================
 @executor.job
-def send_support_assurance_email(recipient_email, username, issue_type, issue_details):
-    """Sends confirmation to user and notification to Admin with Reply-To header."""
+def send_support_assurance_email(recipient_email: str, username: str, issue_type: str, issue_details: str):
+    """Sends confirmation to user and ticket notification to Admin with Reply-To."""
     app = current_app._get_current_object()
-    
-    # 1. Setup basic info
-    sender = app.config.get('MAIL_DEFAULT_SENDER')
-    admin_email = app.config.get('MAIL_ADMIN_ADDRESS') # Ensure this is in your config
-    
-    # --- EMAIL A: FOR THE USER (The "Pretty" Confirmation) ---
+    admin_email = app.config.get('MAIL_ADMIN_ADDRESS')
+
+    # 1. User confirmation
     user_subject = f"Learnova Support: Ticket Received ({issue_type})"
-    user_text = f"Hello {username},\n\nWe've received your report regarding '{issue_type}'. Details: {issue_details}. Our team will get back to you soon."
-    
+    user_text = (
+        f"Hello {username},\n\nWe've received your report regarding '{issue_type}'. "
+        f"Details: {issue_details}. Our team will get back to you soon."
+    )
     try:
         user_html = SUPPORT_ASSURANCE_HTML_BODY.format(
             username=username, 
             issue_type=issue_type, 
             issue_details=issue_details
         )
-        
-        user_msg = Message(user_subject, sender=sender, recipients=[recipient_email])
-        user_msg.html = user_html
-        user_msg.body = user_text
-        
-        # --- EMAIL B: FOR THE ADMIN (The "Actionable" Alert) ---
-        admin_subject = f"NEW TICKET [{issue_type}] from {username}"
-        admin_msg = Message(
-            admin_subject,
-            sender=sender,
-            recipients=[admin_email],
-            reply_to=recipient_email  # This makes 'Reply' go to the user!
-        )
-        admin_msg.body = f"""
-        New Support Request:
-        -------------------
-        User: {username} ({recipient_email})
-        Type: {issue_type}
-        
-        Message:
-        {issue_details}
-        
-        --
-        End of Ticket.
-        """
+        _send_sync_email(recipient_email, user_subject, user_html, user_text)
 
-        # Send both emails
-        mail.send(user_msg)
-        mail.send(admin_msg)
-        app.logger.info(f"Support cycle successful for {recipient_email}")
+        # 2. Admin notification with Reply-To header pointing to user's email
+        if admin_email:
+            admin_subject = f"NEW TICKET [{issue_type}] from {username}"
+            admin_text = f"""New Support Request:
+-------------------
+User: {username} ({recipient_email})
+Type: {issue_type}
 
+Message:
+{issue_details}
+
+--
+End of Ticket.
+"""
+            admin_html = f"<pre style='font-family: monospace;'>{admin_text}</pre>"
+            _send_sync_email(admin_email, admin_subject, admin_html, admin_text, reply_to=recipient_email)
+            
     except Exception as e:
-        app.logger.error(f"Failed to complete support email cycle: {e}")
+        logger.error(f"Failed to complete support email cycle for {recipient_email}: {e}")
 
 
+# =========================================================================
+# 7. CURRICULUM READY NOTIFICATION
+# =========================================================================
 @executor.job
-def send_course_fetched_email(recipient_email, username, branch_name, course_grade, course_level, course_context):
-    """Sends a hyper-personalized notification when a requested course is ready."""
-    app = current_app._get_current_object()
-    
-    # Subject: Your B.Tech - YEAR 1 (CSE) Course is Ready! 📚
+def send_course_fetched_email(recipient_email: str, username: str, branch_name: str, course_grade: str, course_level: str, course_context: str):
+    """Sends a notification when a requested course is ready."""
+    courses_link = _get_external_url('main.get_user_profile', '/profile')
     subject = f"Your {course_context} - {course_grade} ({branch_name}) is Ready! 🚀"
-    sender = app.config.get('MAIL_DEFAULT_SENDER')
-    
-    courses_link = url_for('main.get_user_profile', _external=True)
 
     try:
-        # Pass all architectural data to the template
         html_body = COURSE_FETCHED_HTML_BODY.format(
             username=username,
-            level=course_level.capitalize(), # 'School' or 'College'
-            context=course_context,           # 'CBSE' or 'B.Tech'
-            grade=course_grade,               # 'STD 10' or 'YEAR 2'
-            branch=branch_name,               # 'BIO' or 'CSE'
+            level=course_level.capitalize(),
+            context=course_context,
+            grade=course_grade,
+            branch=branch_name,
             dashboard_url=courses_link
         )
-
-        msg = Message(subject, sender=sender, recipients=[recipient_email])
-        msg.html = html_body
-        
-        # Text fallback
-        msg.body = (f"Hi {username}, the {course_context} {course_grade} {branch_name} course "
-                    f"you requested is now live on Learnova! View it here: {courses_link}")
-
-        mail.send(msg)
-        logger.info(f"Full-context email sent to {recipient_email} for {course_context}")
-        
+        text_body = (
+            f"Hi {username}, the {course_context} {course_grade} {branch_name} course "
+            f"you requested is now live on Learnova! View it here: {courses_link}"
+        )
+        _send_sync_email(recipient_email, subject, html_body, text_body)
     except Exception as e:
-        logger.error(f"Failed to send full-context email: {e}")
+        logger.error(f"Failed to send course-fetched email to {recipient_email}: {e}")

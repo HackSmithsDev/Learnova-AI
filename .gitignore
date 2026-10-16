@@ -20,7 +20,6 @@ instance/
 vector_store/
 
 # --- Docker & DevOps ---
-.dockerignore
 docker-compose.override.yml
 .buildozer/
 bin/

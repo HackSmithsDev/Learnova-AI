@@ -52,6 +52,9 @@ MAIL_PASSWORD=your_mail_password
 MAIL_FROM=your_mail_username
 MAIL_FROM_NAME=Learnova
 ADMIN_EMAIL=your_admin_email
+
+For Docker's Cloudflare Tunnel service, set `CLOUDFLARED_TUNNEL_TOKEN` in `.env` to your tunnel token. Keep `.env` local and do not commit credentials.
+
 2. Run with Docker (Recommended)
 
 This method handles PostgreSQL and Redis setup automatically.

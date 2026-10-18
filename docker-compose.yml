@@ -9,6 +9,12 @@ services:
       - "5001:5001"
     env_file:
       - .env
+    environment:
+      # Ensure Flask inside container listens on all interfaces
+      FLASK_HOST: 0.0.0.0
+      FLASK_RUN_PORT: 5001
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-password}@db:5432/${DB_NAME:-learnova_db}
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
@@ -30,10 +36,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-learnova_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: always
 
   # Redis 7 (The "Fast Memory" for Limiter)
   redis:
@@ -41,6 +48,18 @@ services:
     container_name: learnova_redis
     ports:
       - "6379:6379"
+    restart: always
+
+  # Cloudflare Tunnel for secure ingress
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: learnova_tunnel
+    restart: always
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARED_TUNNEL_TOKEN:?Set CLOUDFLARED_TUNNEL_TOKEN in .env}
+    command: tunnel --no-autoupdate run
+    depends_on:
+      - web
 
 volumes:
   postgres_data:
